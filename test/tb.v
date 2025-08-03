@@ -11,7 +11,7 @@ module tb ();
         $dumpvars(0, tb);
         #1;
     end
-
+    
     // Wire up the inputs and outputs:
     reg clk;
     reg rst_n;
@@ -21,7 +21,7 @@ module tb ();
     wire [7:0] uo_out;
     wire [7:0] uio_out;
     wire [7:0] uio_oe;
-
+    
     // Replace tt_um_example with your module name:
     tt_um_ev_motor_control user_project (
         .ui_in  (ui_in),    // Dedicated inputs
@@ -33,20 +33,21 @@ module tb ();
         .clk    (clk),      // clock
         .rst_n  (rst_n)     // not reset
     );
-
-    // Clock generation - 10ns period (100MHz)
-    // Note: Clock is now controlled by cocotb, so we don't generate it here
-    // when using cocotb. Uncomment the line below only for standalone simulation.
-    // always #5 clk = ~clk;
-
-    // Remove the initial block that was causing conflicts with cocotb
-    // The cocotb test.py will drive all the signals instead
+    
+    // Clock generation is controlled by cocotb
+    // Initial values to prevent X states
+    initial begin
+        clk = 0;
+        rst_n = 0;
+        ena = 0;
+        ui_in = 0;
+        uio_in = 0;
+    end
     
     // Optional: Add a timeout for safety (much longer than cocotb test duration)
     initial begin
-        #1000000;  // 1ms timeout - much longer than typical cocotb tests
+        #10000000;  // 10ms timeout - much longer than typical cocotb tests
         $display("Testbench timeout reached");
         $finish;
     end
-
 endmodule

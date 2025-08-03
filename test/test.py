@@ -13,8 +13,8 @@ os.environ['COCOTB_RESOLVE_X'] = '0'
 async def test_project(dut):
     dut._log.info("Start")
     
-    # Set the clock period to 10 us (100 KHz)
-    clock = Clock(dut.clk, 10, units="us")
+    # Set the clock period to 10 ns (100 MHz) - faster for simulation
+    clock = Clock(dut.clk, 10, units="ns")
     cocotb.start_soon(clock.start())
     
     # Helper function to safely read output values
@@ -31,9 +31,9 @@ async def test_project(dut):
     dut.ui_in.value = 0
     dut.uio_in.value = 0
     dut.rst_n.value = 0
-    await ClockCycles(dut.clk, 10)
+    await ClockCycles(dut.clk, 20)  # Longer reset
     dut.rst_n.value = 1
-    await ClockCycles(dut.clk, 5)  # Allow reset to complete
+    await ClockCycles(dut.clk, 10)  # Allow reset to complete
     
     dut._log.info("=== Testing EV Motor Control Module ===")
     

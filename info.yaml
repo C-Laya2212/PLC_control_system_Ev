@@ -2,17 +2,14 @@
 project:
   title:        "PLC Based Electric Vehicle Motor Control System"      # Project title
   author:       "Laya"      # Your name
-  discord:      " "      # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
+  discord:      ""      # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
   description:  "A comprehensive PLC-based motor control system for electric vehicles with PWM speed control, safety features, and dual PLC/HMI operation modes"      # One line description of what your project does
   language:     "Verilog" # other examples include Verilog, Amaranth, VHDL, etc
   clock_hz:     10000000       # Clock frequency in Hz (or 0 if not applicable)
-
   # How many tiles your design occupies? A single tile is about 167x108 uM.
   tiles: "1x1"    # Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 6x2 or 8x2
-
   # Your top module name must start with "tt_um_". Make it unique by including your github username:
   top_module:  "tt_um_ev_motor_control"
-
   # List your project's source files here. Source files must be in ./src and you must list each source file separately, one per line:
   source_files:
     - "project.v"
@@ -29,7 +26,6 @@ pinout:
   ui[5]: "mode_select"
   ui[6]: "headlight_plc"
   ui[7]: "headlight_hmi"
-
   # Outputs
   uo[0]: "power_status"
   uo[1]: "headlight_out"
@@ -39,16 +35,15 @@ pinout:
   uo[5]: "overheat_warning"
   uo[6]: "status_led[0]"
   uo[7]: "status_led[1]"
-
   # Bidirectional pins
   uio[0]: "horn_plc (input)"
   uio[1]: "horn_hmi (input)"
   uio[2]: "right_ind_plc (input)"
   uio[3]: "right_ind_hmi (input)"
-  uio[4]: "motor_speed[4] (output)"
-  uio[5]: "motor_speed[5] (output)"
-  uio[6]: "motor_speed[6] (output)"
-  uio[7]: "motor_speed[7] (output)"
+  uio[4]: "motor_speed[0] (output)"
+  uio[5]: "motor_speed[1] (output)"
+  uio[6]: "motor_speed[2] (output)"
+  uio[7]: "motor_speed[3] (output)"
 
 # Do not change!
 yaml_version: 6

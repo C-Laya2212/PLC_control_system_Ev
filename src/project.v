@@ -59,29 +59,30 @@ module tt_um_ev_motor_control (
     reg [7:0] operation_counter;
     wire pwm_clk;
 
-    // Data input control for motor speed calculation
-    reg data_capture_phase;
-    reg [3:0] data_counter;
+    // Data input control for motor speed calculation - FIXED
+    reg [2:0] data_counter;
+    reg data_phase_toggle;
 
     // =============================================================================
-    // DATA INPUT HANDLING - For Motor Speed Calculation (Case 5)
+    // DATA INPUT HANDLING - FIXED for Motor Speed Calculation
     // =============================================================================
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             accelerator_value <= 4'd8;      // Default accelerator
             brake_value <= 4'd3;            // Default brake  
-            data_capture_phase <= 1'b0;
-            data_counter <= 4'b0;
+            data_counter <= 3'b0;
+            data_phase_toggle <= 1'b0;
         end else begin
             data_counter <= data_counter + 1;
             
-            // Capture accelerator and brake data in phases
-            if (data_counter[2:0] == 3'b000) begin
-                data_capture_phase <= 1'b0;
-                accelerator_value <= accelerator_brake_data;
-            end else if (data_counter[2:0] == 3'b100) begin
-                data_capture_phase <= 1'b1;
-                brake_value <= accelerator_brake_data;
+            // Simple alternating capture - every 8 clock cycles
+            if (data_counter == 3'b000) begin
+                data_phase_toggle <= ~data_phase_toggle;
+                if (data_phase_toggle) begin
+                    brake_value <= accelerator_brake_data;
+                end else begin
+                    accelerator_value <= accelerator_brake_data;
+                end
             end
         end
     end
@@ -123,19 +124,14 @@ module tt_um_ev_motor_control (
         end
     end
 
-    // Input selection based on mode - FIXED
+    // Input selection based on mode - SIMPLIFIED
     always @(*) begin
-        if (mode_select) begin  // HMI mode
-            selected_accelerator = accelerator_value;
-            selected_brake = brake_value;
-        end else begin  // PLC mode
-            selected_accelerator = accelerator_value;
-            selected_brake = brake_value;
-        end
+        selected_accelerator = accelerator_value;
+        selected_brake = brake_value;
     end
 
     // =============================================================================
-    // MAIN CONTROL LOGIC - ALL CASES IMPLEMENTED
+    // MAIN CONTROL LOGIC - FIXED
     // =============================================================================
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -170,7 +166,7 @@ module tt_um_ev_motor_control (
                     // CASE 0: POWER CONTROL (operation_select = 3'b000)
                     // =================================================================
                     3'b000: begin
-                        // Power control is handled above
+                        // Power control is handled above - just maintain state
                     end
                     
                     // =================================================================
@@ -198,19 +194,19 @@ module tt_um_ev_motor_control (
                     end
                     
                     // =================================================================
-                    // CASE 4: MOTOR SPEED CALCULATION (operation_select = 3'b100)
+                    // CASE 4: MOTOR SPEED CALCULATION - FIXED
                     // =================================================================
                     3'b100: begin
                         if (!temperature_fault) begin
-                            // Calculate speed: accelerator - brake
+                            // Calculate speed: accelerator - brake and assign directly
                             if (selected_accelerator > selected_brake) begin
                                 speed_calculation <= selected_accelerator - selected_brake;
+                                // Use combinational logic for immediate assignment
+                                motor_speed <= {(selected_accelerator - selected_brake), 4'b0000};
                             end else begin
                                 speed_calculation <= 4'b0;
+                                motor_speed <= 8'b0;
                             end
-                            
-                            // Scale to 8-bit motor speed (multiply by 16 for good range)
-                            motor_speed <= {speed_calculation, 4'b0000};
                             motor_active <= 1'b1;
                         end else begin
                             // Reduce speed by 50% during overheating
@@ -286,7 +282,7 @@ module tt_um_ev_motor_control (
     wire right_indicator = indicator_active & system_enabled;
     
     // PWM output with proper duty cycle control
-    wire motor_pwm = (system_enabled && !temperature_fault && pwm_duty_cycle > 0) ? 
+    wire motor_pwm = (system_enabled && pwm_duty_cycle > 0) ? 
                      (pwm_counter < pwm_duty_cycle) : 1'b0;
                      
     wire overheat_warning = temperature_fault;

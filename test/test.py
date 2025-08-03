@@ -25,198 +25,243 @@ async def test_project(dut):
             dut._log.warning(f"Signal contains X/Z values: {signal.value}, treating as 0")
             return 0
     
+    # Helper function to decode output
+    def decode_output(uo_out_val):
+        power = uo_out_val & 0x01
+        headlight = (uo_out_val >> 1) & 0x01
+        horn = (uo_out_val >> 2) & 0x01
+        indicator = (uo_out_val >> 3) & 0x01
+        pwm = (uo_out_val >> 4) & 0x01
+        overheat = (uo_out_val >> 5) & 0x01
+        status_leds = (uo_out_val >> 6) & 0x03
+        return power, headlight, horn, indicator, pwm, overheat, status_leds
+    
     # Reset
     dut._log.info("Reset")
     dut.ena.value = 1
     dut.ui_in.value = 0
     dut.uio_in.value = 0
     dut.rst_n.value = 0
-    await ClockCycles(dut.clk, 50)  # Longer reset for stability
+    await ClockCycles(dut.clk, 50)
     dut.rst_n.value = 1
-    await ClockCycles(dut.clk, 20)  # Allow reset to complete
+    await ClockCycles(dut.clk, 30)
     
-    dut._log.info("=== Testing EV Motor Control Module ===")
+    dut._log.info("=== TESTING ALL CASES - EV MOTOR CONTROL ===")
     
-    # Test 1: Power Control (operation_select = 3'b000)
-    dut._log.info("Test 1: Power Control")
-    dut.ui_in.value = 0b00001000  # power_on_plc=1, power_on_hmi=0, operation_select=000
-    await ClockCycles(dut.clk, 30)  # Wait longer for signals to stabilize
+    # =============================================================================
+    # CASE 1: POWER CONTROL (operation_select = 3'b000)
+    # =============================================================================
+    dut._log.info("CASE 1: POWER CONTROL")
     
-    # Check power status (uo_out[0])
-    output_val = safe_read_output(dut.uo_out)
-    power_status = output_val & 0x01
-    dut._log.info(f"Power Control - Output: 0x{output_val:02x}, Power Status: {power_status}")
-    assert power_status == 1, f"Expected power status = 1, got {power_status}"
-    
-    # Test 2: Headlight Control (operation_select = 3'b001) - System must be powered first
-    dut._log.info("Test 2: Headlight Control")
-    # First ensure system is powered
+    # Test PLC power on
     dut.ui_in.value = 0b00001000  # power_on_plc=1, operation_select=000
-    await ClockCycles(dut.clk, 20)
-    
-    # Now test headlight with XOR logic (only one should be active)
-    dut.ui_in.value = 0b01000001  # headlight_plc=1, headlight_hmi=0, operation_select=001
     await ClockCycles(dut.clk, 30)
     
     output_val = safe_read_output(dut.uo_out)
-    headlight_status = (output_val >> 1) & 0x01
-    power_status = output_val & 0x01
-    dut._log.info(f"Headlight Control - Output: 0x{output_val:02x}, Power: {power_status}, Headlight: {headlight_status}")
+    power, headlight, horn, indicator, pwm, overheat, status_leds = decode_output(output_val)
     
-    # Test 3: Horn Control (operation_select = 3'b010)
-    dut._log.info("Test 3: Horn Control")
+    dut._log.info(f"PLC Power ON - Output: 0x{output_val:02x}")
+    dut._log.info(f"  Power: {power}, Status LEDs: {status_leds}")
+    assert power == 1, f"Expected power=1, got {power}"
+    
+    # Test HMI power on
+    dut.ui_in.value = 0b00010000  # power_on_hmi=1, operation_select=000
+    await ClockCycles(dut.clk, 30)
+    
+    output_val = safe_read_output(dut.uo_out)
+    power, _, _, _, _, _, _ = decode_output(output_val)
+    dut._log.info(f"HMI Power ON - Power: {power}")
+    assert power == 1, f"Expected power=1, got {power}"
+    
+    # Test both power sources
+    dut.ui_in.value = 0b00011000  # both power sources, operation_select=000
+    await ClockCycles(dut.clk, 30)
+    
+    output_val = safe_read_output(dut.uo_out)
+    power, _, _, _, _, _, _ = decode_output(output_val)
+    dut._log.info(f"Both Power Sources - Power: {power}")
+    assert power == 1, f"Expected power=1, got {power}"
+    
+    # =============================================================================
+    # CASE 2: HEADLIGHT CONTROL (operation_select = 3'b001)
+    # =============================================================================
+    dut._log.info("CASE 2: HEADLIGHT CONTROL")
+    
     # Ensure power is on first
     dut.ui_in.value = 0b00001000  # power_on_plc=1, operation_select=000
-    await ClockCycles(dut.clk, 10)
+    await ClockCycles(dut.clk, 20)
     
-    dut.ui_in.value = 0b00000010  # operation_select=010
+    # Test PLC headlight only (XOR: 1^0 = 1)
+    dut.ui_in.value = 0b01001001  # headlight_plc=1, headlight_hmi=0, power_on_plc=1, operation_select=001
+    await ClockCycles(dut.clk, 30)
+    
+    output_val = safe_read_output(dut.uo_out)
+    power, headlight, _, _, _, _, _ = decode_output(output_val)
+    dut._log.info(f"PLC Headlight Only - Output: 0x{output_val:02x}, Power: {power}, Headlight: {headlight}")
+    assert headlight == 1, f"Expected headlight=1, got {headlight}"
+    
+    # Test HMI headlight only (XOR: 0^1 = 1)  
+    dut.ui_in.value = 0b10001001  # headlight_plc=0, headlight_hmi=1, power_on_plc=1, operation_select=001
+    await ClockCycles(dut.clk, 30)
+    
+    output_val = safe_read_output(dut.uo_out)
+    _, headlight, _, _, _, _, _ = decode_output(output_val)
+    dut._log.info(f"HMI Headlight Only - Headlight: {headlight}")
+    assert headlight == 1, f"Expected headlight=1, got {headlight}"
+    
+    # Test both headlights (XOR: 1^1 = 0)
+    dut.ui_in.value = 0b11001001  # headlight_plc=1, headlight_hmi=1, power_on_plc=1, operation_select=001
+    await ClockCycles(dut.clk, 30)
+    
+    output_val = safe_read_output(dut.uo_out)
+    _, headlight, _, _, _, _, _ = decode_output(output_val)
+    dut._log.info(f"Both Headlights (XOR) - Headlight: {headlight}")
+    assert headlight == 0, f"Expected headlight=0 (XOR), got {headlight}"
+    
+    # =============================================================================
+    # CASE 3: HORN CONTROL (operation_select = 3'b010)
+    # =============================================================================
+    dut._log.info("CASE 3: HORN CONTROL")
+    
+    # Ensure power is on
+    dut.ui_in.value = 0b00001000  # power_on_plc=1, operation_select=000
+    await ClockCycles(dut.clk, 20)
+    
+    # Test PLC horn only (XOR: 1^0 = 1)
+    dut.ui_in.value = 0b00001010  # power_on_plc=1, operation_select=010
     dut.uio_in.value = 0b00000001  # horn_plc=1, horn_hmi=0
     await ClockCycles(dut.clk, 30)
     
     output_val = safe_read_output(dut.uo_out)
-    horn_status = (output_val >> 2) & 0x01
-    power_status = output_val & 0x01
-    dut._log.info(f"Horn Control - Output: 0x{output_val:02x}, Power: {power_status}, Horn: {horn_status}")
+    power, _, horn, _, _, _, _ = decode_output(output_val)
+    dut._log.info(f"PLC Horn Only - Output: 0x{output_val:02x}, Power: {power}, Horn: {horn}")
+    assert horn == 1, f"Expected horn=1, got {horn}"
     
-    # Test 4: Right Indicator Control (operation_select = 3'b011)
-    dut._log.info("Test 4: Right Indicator Control")
-    # Ensure power is on first
+    # Test HMI horn only (XOR: 0^1 = 1)
+    dut.uio_in.value = 0b00000010  # horn_plc=0, horn_hmi=1
+    await ClockCycles(dut.clk, 30)
+    
+    output_val = safe_read_output(dut.uo_out)
+    _, _, horn, _, _, _, _ = decode_output(output_val)
+    dut._log.info(f"HMI Horn Only - Horn: {horn}")
+    assert horn == 1, f"Expected horn=1, got {horn}"
+    
+    # Test both horns (XOR: 1^1 = 0)
+    dut.uio_in.value = 0b00000011  # horn_plc=1, horn_hmi=1
+    await ClockCycles(dut.clk, 30)
+    
+    output_val = safe_read_output(dut.uo_out)
+    _, _, horn, _, _, _, _ = decode_output(output_val)
+    dut._log.info(f"Both Horns (XOR) - Horn: {horn}")
+    assert horn == 0, f"Expected horn=0 (XOR), got {horn}"
+    
+    # =============================================================================
+    # CASE 4: RIGHT INDICATOR CONTROL (operation_select = 3'b011)
+    # =============================================================================
+    dut._log.info("CASE 4: RIGHT INDICATOR CONTROL")
+    
+    # Ensure power is on
     dut.ui_in.value = 0b00001000  # power_on_plc=1, operation_select=000
-    await ClockCycles(dut.clk, 10)
+    await ClockCycles(dut.clk, 20)
     
-    dut.ui_in.value = 0b00000011  # operation_select=011
+    # Test PLC indicator only (XOR: 1^0 = 1)
+    dut.ui_in.value = 0b00001011  # power_on_plc=1, operation_select=011
     dut.uio_in.value = 0b00000100  # right_ind_plc=1, right_ind_hmi=0
     await ClockCycles(dut.clk, 30)
     
     output_val = safe_read_output(dut.uo_out)
-    indicator_status = (output_val >> 3) & 0x01
-    power_status = output_val & 0x01
-    dut._log.info(f"Indicator Control - Output: 0x{output_val:02x}, Power: {power_status}, Indicator: {indicator_status}")
+    power, _, _, indicator, _, _, _ = decode_output(output_val)
+    dut._log.info(f"PLC Indicator Only - Output: 0x{output_val:02x}, Power: {power}, Indicator: {indicator}")
+    assert indicator == 1, f"Expected indicator=1, got {indicator}"
     
-    # Test 5: Motor Speed Calculation (operation_select = 3'b100)
-    dut._log.info("Test 5: Motor Speed Calculation")
+    # Test HMI indicator only (XOR: 0^1 = 1)
+    dut.uio_in.value = 0b00001000  # right_ind_plc=0, right_ind_hmi=1
+    await ClockCycles(dut.clk, 30)
     
-    # First ensure power is on
+    output_val = safe_read_output(dut.uo_out)
+    _, _, _, indicator, _, _, _ = decode_output(output_val)
+    dut._log.info(f"HMI Indicator Only - Indicator: {indicator}")
+    assert indicator == 1, f"Expected indicator=1, got {indicator}"
+    
+    # =============================================================================
+    # CASE 5: MOTOR SPEED CALCULATION (operation_select = 3'b100)
+    # =============================================================================
+    dut._log.info("CASE 5: MOTOR SPEED CALCULATION")
+    
+    # Ensure power is on
     dut.ui_in.value = 0b00001000  # power_on_plc=1, operation_select=000
     await ClockCycles(dut.clk, 20)
     
-    # Set accelerator data (simulate accelerator = 12)
-    dut.ui_in.value = 0b00000100  # operation_select=100
+    # Test motor speed calculation
+    dut.ui_in.value = 0b00001100  # power_on_plc=1, operation_select=100
+    
+    # Set accelerator = 12
     dut.uio_in.value = 0b11000000  # accelerator_brake_data = 12 (1100)
-    await ClockCycles(dut.clk, 10)  # Wait for data_select to be 0
+    await ClockCycles(dut.clk, 20)
     
-    # Set brake data (simulate brake = 4)
+    # Set brake = 4  
     dut.uio_in.value = 0b01000000  # accelerator_brake_data = 4 (0100)
-    await ClockCycles(dut.clk, 30)  # Wait longer for calculation
+    await ClockCycles(dut.clk, 40)
     
-    # Check motor speed output
+    # Check results
     motor_speed = safe_read_output(dut.uio_out)
     output_val = safe_read_output(dut.uo_out)
-    power_status = output_val & 0x01
-    dut._log.info(f"Motor Speed Calculation - uio_out: {motor_speed}, uo_out: 0x{output_val:02x}, Power: {power_status}")
+    power, _, _, _, _, _, _ = decode_output(output_val)
     
-    # Expected: accelerator(12) - brake(4) = 8, scaled by 16 = 128
     expected_speed = (12 - 4) * 16  # 8 * 16 = 128
-    dut._log.info(f"Expected motor speed: {expected_speed}, Actual: {motor_speed}")
+    dut._log.info(f"Motor Speed Test 1 - Motor Speed: {motor_speed}, Expected: {expected_speed}")
+    dut._log.info(f"  Power: {power}, Output: 0x{output_val:02x}")
     
-    # Test 6: PWM Generation (operation_select = 3'b101)
-    dut._log.info("Test 6: PWM Generation")
-    dut.ui_in.value = 0b00000101  # operation_select=101
-    await ClockCycles(dut.clk, 50)  # Wait longer for PWM to stabilize
+    # Test with different values: accelerator=10, brake=3
+    dut.uio_in.value = 0b10100000  # accelerator = 10
+    await ClockCycles(dut.clk, 20)
+    dut.uio_in.value = 0b00110000  # brake = 3
+    await ClockCycles(dut.clk, 40)
     
-    # Monitor PWM signal for several cycles
+    motor_speed2 = safe_read_output(dut.uio_out)
+    expected_speed2 = (10 - 3) * 16  # 7 * 16 = 112
+    dut._log.info(f"Motor Speed Test 2 - Motor Speed: {motor_speed2}, Expected: {expected_speed2}")
+    
+    # Test edge case: brake >= accelerator
+    dut.uio_in.value = 0b00110000  # accelerator = 3
+    await ClockCycles(dut.clk, 20)
+    dut.uio_in.value = 0b10000000  # brake = 8
+    await ClockCycles(dut.clk, 40)
+    
+    motor_speed3 = safe_read_output(dut.uio_out)
+    dut._log.info(f"Motor Speed Test 3 (brake > accel) - Motor Speed: {motor_speed3}, Expected: 0")
+    assert motor_speed3 == 0, f"Expected motor_speed=0 when brake>accel, got {motor_speed3}"
+    
+    # =============================================================================
+    # CASE 6: PWM GENERATION (operation_select = 3'b101)
+    # =============================================================================
+    dut._log.info("CASE 6: PWM GENERATION")
+    
+    # Set a known motor speed first
+    dut.ui_in.value = 0b00001100  # motor speed calculation mode
+    dut.uio_in.value = 0b10000000  # accelerator = 8
+    await ClockCycles(dut.clk, 20)
+    dut.uio_in.value = 0b00100000  # brake = 2
+    await ClockCycles(dut.clk, 40)
+    
+    # Now test PWM generation
+    dut.ui_in.value = 0b00001101  # power_on_plc=1, operation_select=101
+    await ClockCycles(dut.clk, 30)
+    
+    # Monitor PWM signal
     pwm_values = []
-    for i in range(20):  # More samples for better PWM analysis
+    for i in range(60):  # More samples for better analysis
         output_val = safe_read_output(dut.uo_out)
-        pwm_status = (output_val >> 4) & 0x01
-        power_status = output_val & 0x01
-        pwm_values.append(pwm_status)
-        await ClockCycles(dut.clk, 5)
+        _, _, _, _, pwm, _, _ = decode_output(output_val)
+        pwm_values.append(pwm)
+        await ClockCycles(dut.clk, 3)
     
     pwm_high_count = sum(pwm_values)
-    dut._log.info(f"PWM Generation - PWM values: {pwm_values}, High Count: {pwm_high_count}/20")
-    dut._log.info(f"PWM duty cycle: {(pwm_high_count/20)*100:.1f}%")
+    duty_cycle_percent = (pwm_high_count / len(pwm_values)) * 100
     
-    # Test 7: Temperature Monitoring
-    dut._log.info("Test 7: Temperature and Status Monitoring")
-    dut.ui_in.value = 0b00000110  # operation_select=110
-    await ClockCycles(dut.clk, 20)
+    dut._log.info(f"PWM Generation - High Count: {pwm_high_count}/{len(pwm_values)}")
+    dut._log.info(f"PWM Duty Cycle: {duty_cycle_percent:.1f}%")
+    dut._log.info(f"PWM Pattern (first 20): {pwm_values[:20]}")
     
-    output_val = safe_read_output(dut.uo_out)
-    overheat_status = (output_val >> 5) & 0x01
-    status_leds = (output_val >> 6) & 0x03
-    power_status = output_val & 0x01
-    
-    dut._log.info(f"Status Check - Output: 0x{output_val:02x}")
-    dut._log.info(f"Power: {power_status}, Overheat Warning: {overheat_status}")
-    dut._log.info(f"Status LEDs: 0x{status_leds:02x}")
-    
-    # Test 8: HMI Mode vs PLC Mode
-    dut._log.info("Test 8: Mode Selection (HMI vs PLC)")
-    
-    # Test HMI mode power control
-    dut.ui_in.value = 0b00110000  # mode_select=1 (HMI), power_on_hmi=1, operation_select=000
-    await ClockCycles(dut.clk, 30)
-    
-    output_val = safe_read_output(dut.uo_out)
-    power_status_hmi = output_val & 0x01
-    dut._log.info(f"HMI Mode Test - Output: 0x{output_val:02x}, Power Status: {power_status_hmi}")
-    assert power_status_hmi == 1, f"Expected HMI power status = 1, got {power_status_hmi}"
-    
-    # Test 9: System Reset/Power Off
-    dut._log.info("Test 9: Power Off Test")
-    dut.ui_in.value = 0b00000000  # All controls off, operation_select=000
-    await ClockCycles(dut.clk, 30)
-    
-    output_val = safe_read_output(dut.uo_out)
-    uio_output_val = safe_read_output(dut.uio_out)
-    power_off = output_val & 0x01
-    dut._log.info(f"Power Off - uo_out: 0x{output_val:02x}, uio_out: {uio_output_val}, Power: {power_off}")
-    assert power_off == 0, f"Expected power off = 0, got {power_off}"
-    
-    # Test 10: Edge Cases - Brake > Accelerator
-    dut._log.info("Test 10: Edge Cases - Brake >= Accelerator")
-    
-    # Power on first
-    dut.ui_in.value = 0b00001000  # power_on_plc=1, operation_select=000
-    await ClockCycles(dut.clk, 20)
-    
-    # Test motor speed calculation with brake >= accelerator
-    dut.ui_in.value = 0b00000100  # operation_select=100
-    dut.uio_in.value = 0b01000000  # Set accelerator = 4
-    await ClockCycles(dut.clk, 10)
-    dut.uio_in.value = 0b11000000  # Set brake = 12
-    await ClockCycles(dut.clk, 30)
-    
-    motor_speed_edge = safe_read_output(dut.uio_out)
-    output_val = safe_read_output(dut.uo_out)
-    dut._log.info(f"Edge Case (brake > accel) - Motor Speed: {motor_speed_edge}, Output: 0x{output_val:02x}")
-    # Should be 0 when brake >= accelerator
-    
-    # Test 11: XOR Logic Verification
-    dut._log.info("Test 11: XOR Logic Verification")
-    
-    # Power on
-    dut.ui_in.value = 0b00001000  # power_on_plc=1, operation_select=000
-    await ClockCycles(dut.clk, 20)
-    
-    # Test headlight XOR: both PLC and HMI active should result in OFF
-    dut.ui_in.value = 0b11000001  # headlight_plc=1, headlight_hmi=1, operation_select=001
-    await ClockCycles(dut.clk, 30)
-    
-    output_val = safe_read_output(dut.uo_out)
-    headlight_xor = (output_val >> 1) & 0x01
-    dut._log.info(f"XOR Test (both active) - Output: 0x{output_val:02x}, Headlight: {headlight_xor}")
-    # XOR of 1^1 = 0, so headlight should be OFF
-    
-    # Test headlight XOR: only one active should result in ON
-    dut.ui_in.value = 0b01000001  # headlight_plc=1, headlight_hmi=0, operation_select=001
-    await ClockCycles(dut.clk, 30)
-    
-    output_val = safe_read_output(dut.uo_out)
-    headlight_xor = (output_val >> 1) & 0x01
-    dut._log.info(f"XOR Test (one active) - Output: 0x{output_val:02x}, Headlight: {headlight_xor}")
-    # XOR of 1^0 = 1, so headlight should be ON
-    
-    dut._log.info("=== All Tests Completed Successfully ===")
-    dut._log.info("Fixed design should now show proper functionality with non-zero outputs")
+    # PWM should be active when motor speed > 0
+    assert pwm_high_count > 0, f"Expected PWM activity, got {pwm_high

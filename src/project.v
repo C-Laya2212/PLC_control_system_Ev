@@ -123,7 +123,7 @@ module tt_um_ev_motor_control (
         end
     end
 
-    // Input selection based on mode
+    // Input selection based on mode - FIXED
     always @(*) begin
         if (mode_select) begin  // HMI mode
             selected_accelerator = accelerator_value;
@@ -151,131 +151,115 @@ module tt_um_ev_motor_control (
             speed_calculation <= 4'b0;
         end else if (ena) begin
             
-            // =================================================================
-            // CASE 1: POWER CONTROL (operation_select = 3'b000)
-            // =================================================================
-            if (operation_select == 3'b000) begin
-                system_enabled <= (power_on_plc | power_on_hmi);
-                
-                // Reset all outputs when power is off
-                if (!(power_on_plc | power_on_hmi)) begin
-                    headlight_active <= 1'b0;
-                    horn_active <= 1'b0;
-                    indicator_active <= 1'b0;
-                    motor_active <= 1'b0;
-                    pwm_active <= 1'b0;
-                    motor_speed <= 8'b0;
-                    pwm_duty_cycle <= 8'b0;
-                end
-            end
+            // Power control is always evaluated regardless of operation_select
+            system_enabled <= (power_on_plc | power_on_hmi);
             
-            // =================================================================
-            // CASE 2: HEADLIGHT CONTROL (operation_select = 3'b001)
-            // =================================================================
-            else if (operation_select == 3'b001) begin
-                if (system_enabled) begin
-                    // XOR logic: only one source should control
-                    headlight_active <= (headlight_plc ^ headlight_hmi);
-                end else begin
-                    headlight_active <= 1'b0;
-                end
-            end
-            
-            // =================================================================
-            // CASE 3: HORN CONTROL (operation_select = 3'b010)
-            // =================================================================
-            else if (operation_select == 3'b010) begin
-                if (system_enabled) begin
-                    // XOR logic for horn control
-                    horn_active <= (horn_plc ^ horn_hmi);
-                end else begin
-                    horn_active <= 1'b0;
-                end
-            end
-            
-            // =================================================================
-            // CASE 4: RIGHT INDICATOR CONTROL (operation_select = 3'b011)
-            // =================================================================
-            else if (operation_select == 3'b011) begin
-                if (system_enabled) begin
-                    // XOR logic for indicator control
-                    indicator_active <= (right_ind_plc ^ right_ind_hmi);
-                end else begin
-                    indicator_active <= 1'b0;
-                end
-            end
-            
-            // =================================================================
-            // CASE 5: MOTOR SPEED CALCULATION (operation_select = 3'b100)
-            // =================================================================
-            else if (operation_select == 3'b100) begin
-                if (system_enabled && !temperature_fault) begin
-                    // Calculate speed: accelerator - brake
-                    if (selected_accelerator > selected_brake) begin
-                        speed_calculation <= selected_accelerator - selected_brake;
-                    end else begin
-                        speed_calculation <= 4'b0;
+            // Reset all outputs when power is off
+            if (!(power_on_plc | power_on_hmi)) begin
+                headlight_active <= 1'b0;
+                horn_active <= 1'b0;
+                indicator_active <= 1'b0;
+                motor_active <= 1'b0;
+                pwm_active <= 1'b0;
+                motor_speed <= 8'b0;
+                pwm_duty_cycle <= 8'b0;
+            end else begin
+                // Only execute operations when system is powered
+                case (operation_select)
+                    // =================================================================
+                    // CASE 0: POWER CONTROL (operation_select = 3'b000)
+                    // =================================================================
+                    3'b000: begin
+                        // Power control is handled above
                     end
                     
-                    // Scale to 8-bit motor speed (multiply by 16 for good range)
-                    motor_speed <= {speed_calculation, 4'b0000};
-                    motor_active <= 1'b1;
-                end else if (temperature_fault) begin
-                    // Reduce speed by 50% during overheating
-                    motor_speed <= motor_speed >> 1;
-                    motor_active <= 1'b1;
-                end else begin
-                    motor_speed <= 8'b0;
-                    motor_active <= 1'b0;
-                end
-            end
-            
-            // =================================================================
-            // CASE 6: PWM GENERATION (operation_select = 3'b101)
-            // =================================================================
-            else if (operation_select == 3'b101) begin
-                if (system_enabled && !temperature_fault) begin
-                    pwm_duty_cycle <= motor_speed;
-                    pwm_active <= 1'b1;
-                end else if (temperature_fault) begin
-                    // Reduced PWM during fault
-                    pwm_duty_cycle <= motor_speed >> 1;
-                    pwm_active <= 1'b1;
-                end else begin
-                    pwm_duty_cycle <= 8'b0;
-                    pwm_active <= 1'b0;
-                end
-            end
-            
-            // =================================================================
-            // CASE 7: TEMPERATURE MONITORING (operation_select = 3'b110)
-            // =================================================================
-            else if (operation_select == 3'b110) begin
-                // Temperature monitoring is handled in separate always block
-                // This case maintains current state and allows temperature readout
-            end
-            
-            // =================================================================
-            // CASE 8: SYSTEM STATUS/RESET (operation_select = 3'b111)
-            // =================================================================
-            else if (operation_select == 3'b111) begin
-                if (!system_enabled) begin
-                    // Reset all active states when system is disabled
-                    motor_speed <= 8'b0;
-                    pwm_duty_cycle <= 8'b0;
-                    headlight_active <= 1'b0;
-                    horn_active <= 1'b0;
-                    indicator_active <= 1'b0;
-                    motor_active <= 1'b0;
-                    pwm_active <= 1'b0;
-                end
-            end
-            
-            // =================================================================
-            // DEFAULT CASE: Maintain current state
-            // =================================================================
-            else begin
-                // Maintain current state for any undefined operations
+                    // =================================================================
+                    // CASE 1: HEADLIGHT CONTROL (operation_select = 3'b001)
+                    // =================================================================
+                    3'b001: begin
+                        // XOR logic: only one source should control
+                        headlight_active <= (headlight_plc ^ headlight_hmi);
+                    end
+                    
+                    // =================================================================
+                    // CASE 2: HORN CONTROL (operation_select = 3'b010)
+                    // =================================================================
+                    3'b010: begin
+                        // XOR logic for horn control
+                        horn_active <= (horn_plc ^ horn_hmi);
+                    end
+                    
+                    // =================================================================
+                    // CASE 3: RIGHT INDICATOR CONTROL (operation_select = 3'b011)
+                    // =================================================================
+                    3'b011: begin
+                        // XOR logic for indicator control
+                        indicator_active <= (right_ind_plc ^ right_ind_hmi);
+                    end
+                    
+                    // =================================================================
+                    // CASE 4: MOTOR SPEED CALCULATION (operation_select = 3'b100)
+                    // =================================================================
+                    3'b100: begin
+                        if (!temperature_fault) begin
+                            // Calculate speed: accelerator - brake
+                            if (selected_accelerator > selected_brake) begin
+                                speed_calculation <= selected_accelerator - selected_brake;
+                            end else begin
+                                speed_calculation <= 4'b0;
+                            end
+                            
+                            // Scale to 8-bit motor speed (multiply by 16 for good range)
+                            motor_speed <= {speed_calculation, 4'b0000};
+                            motor_active <= 1'b1;
+                        end else begin
+                            // Reduce speed by 50% during overheating
+                            motor_speed <= motor_speed >> 1;
+                            motor_active <= 1'b1;
+                        end
+                    end
+                    
+                    // =================================================================
+                    // CASE 5: PWM GENERATION (operation_select = 3'b101)
+                    // =================================================================
+                    3'b101: begin
+                        if (!temperature_fault) begin
+                            pwm_duty_cycle <= motor_speed;
+                            pwm_active <= 1'b1;
+                        end else begin
+                            // Reduced PWM during fault
+                            pwm_duty_cycle <= motor_speed >> 1;
+                            pwm_active <= 1'b1;
+                        end
+                    end
+                    
+                    // =================================================================
+                    // CASE 6: TEMPERATURE MONITORING (operation_select = 3'b110)
+                    // =================================================================
+                    3'b110: begin
+                        // Temperature monitoring is handled in separate always block
+                        // This case maintains current state and allows temperature readout
+                    end
+                    
+                    // =================================================================
+                    // CASE 7: SYSTEM STATUS/RESET (operation_select = 3'b111)
+                    // =================================================================
+                    3'b111: begin
+                        // Reset all active states
+                        motor_speed <= 8'b0;
+                        pwm_duty_cycle <= 8'b0;
+                        headlight_active <= 1'b0;
+                        horn_active <= 1'b0;
+                        indicator_active <= 1'b0;
+                        motor_active <= 1'b0;
+                        pwm_active <= 1'b0;
+                    end
+                    
+                    // Default case: maintain current state
+                    default: begin
+                        // Maintain current state for any undefined operations
+                    end
+                endcase
             end
         end
     end
@@ -307,12 +291,11 @@ module tt_um_ev_motor_control (
                      
     wire overheat_warning = temperature_fault;
     wire [1:0] status_led = {temperature_fault, system_enabled};
-    wire [7:0] motor_speed_out = motor_speed;
 
     // Final output assignments
     assign uo_out = {status_led[1:0], overheat_warning, motor_pwm, 
                      right_indicator, horn_out, headlight_out, power_status};
-    assign uio_out = motor_speed_out;
+    assign uio_out = {motor_speed[3:0], 4'b0000}; // Motor speed in upper 4 bits to match uio_oe
 
     // Tie off unused input to prevent warnings
     wire _unused = &{ena, mode_select, motor_active, pwm_active, 1'b0};

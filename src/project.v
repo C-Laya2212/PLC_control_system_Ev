@@ -55,7 +55,7 @@ module tt_um_ev_motor_control (
     reg [3:0] brake_value;
     reg [3:0] selected_accelerator;
     reg [3:0] selected_brake;
-    reg [4:0] speed_calculation;
+    reg [3:0] speed_calculation;  // FIXED: Changed from 5-bit to 4-bit to avoid unused bits
     reg [7:0] motor_speed;
     reg [7:0] pwm_counter;
     reg [7:0] pwm_duty_cycle;
@@ -69,25 +69,27 @@ module tt_um_ev_motor_control (
     reg indicator_active;
 
     // PWM clock divider
-    reg [15:0] pwm_clk_div;  // Increased size for better PWM frequency
+    reg [15:0] pwm_clk_div;
     wire pwm_clk;
 
     // Data input control
     reg data_select;
     
-    // State registers for better timing
-    reg [2:0] current_operation;
-    reg operation_executed;
+    // FIXED: Simplified state management - removed complex operation state tracking
+    reg [7:0] operation_counter;  // Simple counter for operation timing
 
-    // Data input handling - Fixed timing
+    // Data input handling - FIXED: Simplified timing
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             accelerator_value <= 4'b0;
             brake_value <= 4'b0;
             data_select <= 1'b0;
+            operation_counter <= 8'b0;
         end else begin
-            // Toggle between accelerator and brake data input every 4 cycles for stability
-            if (pwm_clk_div[3:0] == 4'b0000) begin
+            operation_counter <= operation_counter + 1;
+            
+            // Simplified data input - toggle every 8 cycles for stability
+            if (operation_counter[2:0] == 3'b000) begin
                 data_select <= ~data_select;
                 if (!data_select) 
                     accelerator_value <= accelerator_brake_data;
@@ -106,7 +108,7 @@ module tt_um_ev_motor_control (
     end
     assign pwm_clk = pwm_clk_div[7]; // Slower PWM for stability
 
-    // Temperature simulation - Fixed and more realistic
+    // Temperature simulation - Simplified
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             internal_temperature <= 7'd25; // Room temperature
@@ -114,24 +116,22 @@ module tt_um_ev_motor_control (
         end else begin
             // Temperature changes based on motor activity
             if (system_enabled && motor_speed > 8'd50) begin
-                // Temperature rises slowly with motor activity
-                if (internal_temperature < 7'd120 && pwm_clk_div[15:8] == 8'h00)
+                if (internal_temperature < 7'd120 && pwm_clk_div[11:0] == 12'h000)
                     internal_temperature <= internal_temperature + 1;
-            end else if (internal_temperature > 7'd25 && pwm_clk_div[15:8] == 8'h00) begin
-                // Temperature cools down slowly
+            end else if (internal_temperature > 7'd25 && pwm_clk_div[11:0] == 12'h000) begin
                 internal_temperature <= internal_temperature - 1;
             end
 
-            // Temperature fault detection with proper hysteresis
+            // Temperature fault detection with hysteresis
             if (internal_temperature >= 7'd110) begin
                 temperature_fault <= 1'b1;
-            end else if (internal_temperature <= 7'd100) begin // 10°C hysteresis for stability
+            end else if (internal_temperature <= 7'd100) begin
                 temperature_fault <= 1'b0;
             end
         end
     end
 
-    // Input selection based on mode - Fixed logic
+    // Input selection based on mode - FIXED: Proper mode selection
     always @(*) begin
         if (mode_select) begin  // HMI mode
             selected_accelerator = accelerator_value;
@@ -142,40 +142,24 @@ module tt_um_ev_motor_control (
         end
     end
 
-    // Operation state management for better timing
+    // FIXED: Main control logic - Continuous operation without complex state management
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            current_operation <= 3'b000;
-            operation_executed <= 1'b0;
-        end else begin
-            if (current_operation != operation_select) begin
-                current_operation <= operation_select;
-                operation_executed <= 1'b0;
-            end else begin
-                operation_executed <= 1'b1;
-            end
-        end
-    end
-
-    // Main control logic - Fixed initialization and logic
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            // FIXED: Proper initialization of ALL registers
+            // Proper initialization of ALL registers
             system_enabled <= 1'b0;
             motor_speed <= 8'b0;
             headlight_active <= 1'b0;
             horn_active <= 1'b0;
             indicator_active <= 1'b0;
             pwm_duty_cycle <= 8'b0;
-            speed_calculation <= 5'b0;
-        end else if (ena && operation_executed) begin
-            case (current_operation)
-                3'b000: begin  // Power Control - FIXED XOR logic
-                    // Use OR logic for power on (either PLC OR HMI can turn on)
-                    // Use XOR for conflict detection if needed
+            speed_calculation <= 4'b0;  // FIXED: Now 4-bit
+        end else if (ena) begin
+            // FIXED: Execute all operations continuously based on current operation_select
+            case (operation_select)
+                3'b000: begin  // Power Control - FIXED: Proper OR logic
                     system_enabled <= (power_on_plc | power_on_hmi);
                     
-                    // Reset other controls when power changes
+                    // Reset other controls when power is off
                     if (!(power_on_plc | power_on_hmi)) begin
                         headlight_active <= 1'b0;
                         horn_active <= 1'b0;
@@ -187,7 +171,7 @@ module tt_um_ev_motor_control (
                 
                 3'b001: begin  // Headlight Control
                     if (system_enabled) begin
-                        // XOR logic: only one source should control
+                        // FIXED: Proper XOR logic for dual source control
                         headlight_active <= (headlight_plc ^ headlight_hmi);
                     end else begin
                         headlight_active <= 1'b0;
@@ -210,17 +194,17 @@ module tt_um_ev_motor_control (
                     end
                 end
                 
-                3'b100: begin  // Motor Speed Calculation - FIXED
+                3'b100: begin  // Motor Speed Calculation - FIXED: Only non-blocking assignments
                     if (system_enabled && !temperature_fault) begin
-                        // Calculate speed: accelerator - brake (with proper bounds checking)
+                        // FIXED: All assignments are now non-blocking
                         if (selected_accelerator > selected_brake) begin
-                            speed_calculation = selected_accelerator - selected_brake;
+                            speed_calculation <= selected_accelerator - selected_brake;
                         end else begin
-                            speed_calculation = 5'b0;
+                            speed_calculation <= 4'b0;
                         end
                         
-                        // Scale to 8-bit motor speed (multiply by 16 for full range)
-                        motor_speed <= {speed_calculation[3:0], 4'b0000};
+                        // Scale to 8-bit motor speed (multiply by 16)
+                        motor_speed <= {speed_calculation, 4'b0000};
                     end else if (temperature_fault) begin
                         // Reduce speed by 50% during overheating
                         motor_speed <= motor_speed >> 1;
@@ -239,7 +223,7 @@ module tt_um_ev_motor_control (
                 
                 3'b110: begin  // Temperature Monitoring
                     // Temperature monitoring is handled in separate always block
-                    // This operation can be used for temperature readout
+                    // This operation maintains current state
                 end
                 
                 3'b111: begin  // System Status/Reset
@@ -266,19 +250,19 @@ module tt_um_ev_motor_control (
         end else if (system_enabled) begin
             pwm_counter <= pwm_counter + 1;
         end else begin
-            pwm_counter <= 8'b0;  // Reset when system disabled
+            pwm_counter <= 8'b0;
         end
     end
 
-    // Output assignments - Fixed logic
+    // FIXED: Output assignments with proper logic
     assign power_status = system_enabled;
-    assign headlight_out = headlight_active & system_enabled;  // AND with system enabled
+    assign headlight_out = headlight_active & system_enabled;
     assign horn_out = horn_active & system_enabled;
     assign right_indicator = indicator_active & system_enabled;
     assign motor_pwm = (system_enabled && !temperature_fault && pwm_duty_cycle > 0) ? 
                        (pwm_counter < pwm_duty_cycle) : 1'b0;
     assign overheat_warning = temperature_fault;
-    assign status_led = {temperature_fault, system_enabled};  // [1]=temp_fault, [0]=system_enabled
+    assign status_led = {temperature_fault, system_enabled};
     assign motor_speed_out = motor_speed;
 
     // Tie off unused input to prevent warnings

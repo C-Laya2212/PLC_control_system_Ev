@@ -35,53 +35,17 @@ module tb ();
     );
 
     // Clock generation - 10ns period (100MHz)
-    always #5 clk = ~clk;
+    // Note: Clock is now controlled by cocotb, so we don't generate it here
+    // when using cocotb. Uncomment the line below only for standalone simulation.
+    // always #5 clk = ~clk;
 
-    // Test stimulus
+    // Remove the initial block that was causing conflicts with cocotb
+    // The cocotb test.py will drive all the signals instead
+    
+    // Optional: Add a timeout for safety (much longer than cocotb test duration)
     initial begin
-        // Initialize all signals
-        clk = 0;
-        rst_n = 0;
-        ena = 1;
-        ui_in = 8'b0;
-        uio_in = 8'b0;
-
-        // Hold reset for some time
-        #50;
-        rst_n = 1;
-        #20;
-
-        $display("=== TinyTapeout EV Motor Control Test Started ===");
-
-        // Test 1: Power Control
-        ui_in[2:0] = 3'b000;    // operation_select = power control
-        ui_in[3] = 1'b1;        // power_on_plc = 1
-        ui_in[4] = 1'b0;        // power_on_hmi = 0
-        #30;
-        $display("Test 1 - Power ON: %b", uo_out[0]);
-
-        // Test 2: Headlight Control
-        ui_in[2:0] = 3'b001;    // operation_select = headlight
-        ui_in[6] = 1'b1;        // headlight_plc = 1
-        ui_in[7] = 1'b0;        // headlight_hmi = 0
-        #30;
-        $display("Test 2 - Headlight ON: %b", uo_out[1]);
-
-        // Test 3: Motor Speed Calculation
-        ui_in[2:0] = 3'b100;    // operation_select = motor speed
-        uio_in[7:4] = 4'd12;    // accelerator = 12
-        #20;
-        uio_in[7:4] = 4'd4;     // brake = 4
-        #30;
-        $display("Test 3 - Motor Speed: %d", uio_out);
-
-        // Test 4: PWM Generation
-        ui_in[2:0] = 3'b101;    // operation_select = PWM
-        #100;
-        $display("Test 4 - PWM Signal: %b", uo_out[4]);
-
-        $display("=== Test Completed ===");
-        #100;
+        #1000000;  // 1ms timeout - much longer than typical cocotb tests
+        $display("Testbench timeout reached");
         $finish;
     end
 

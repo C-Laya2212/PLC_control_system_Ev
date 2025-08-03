@@ -37,9 +37,6 @@ module tt_um_ev_motor_control (
     // Internal registers and wires
     reg [3:0] accelerator_value;
     reg [3:0] brake_value;
-    reg [3:0] selected_accelerator;
-    reg [3:0] selected_brake;
-    reg [3:0] speed_calculation;
     reg [7:0] motor_speed;
     reg [7:0] pwm_counter;
     reg [7:0] pwm_duty_cycle;
@@ -56,33 +53,27 @@ module tt_um_ev_motor_control (
 
     // PWM and timing control
     reg [15:0] pwm_clk_div;
-    reg [7:0] operation_counter;
     wire pwm_clk;
 
-    // Data input control for motor speed calculation - FIXED
-    reg [2:0] data_counter;
-    reg data_phase_toggle;
+    // Data input control - simplified
+    reg [3:0] data_counter;
 
     // =============================================================================
-    // DATA INPUT HANDLING - FIXED for Motor Speed Calculation
+    // DATA INPUT HANDLING - SIMPLIFIED
     // =============================================================================
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             accelerator_value <= 4'd8;      // Default accelerator
             brake_value <= 4'd3;            // Default brake  
-            data_counter <= 3'b0;
-            data_phase_toggle <= 1'b0;
+            data_counter <= 4'b0;
         end else begin
             data_counter <= data_counter + 1;
             
-            // Simple alternating capture - every 8 clock cycles
-            if (data_counter == 3'b000) begin
-                data_phase_toggle <= ~data_phase_toggle;
-                if (data_phase_toggle) begin
-                    brake_value <= accelerator_brake_data;
-                end else begin
-                    accelerator_value <= accelerator_brake_data;
-                end
+            // Capture data every few cycles - alternating between accel and brake
+            if (data_counter[2:0] == 3'b000) begin
+                accelerator_value <= accelerator_brake_data;
+            end else if (data_counter[2:0] == 3'b100) begin
+                brake_value <= accelerator_brake_data;
             end
         end
     end
@@ -91,16 +82,14 @@ module tt_um_ev_motor_control (
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             pwm_clk_div <= 16'b0;
-            operation_counter <= 8'b0;
         end else begin
             pwm_clk_div <= pwm_clk_div + 1;
-            operation_counter <= operation_counter + 1;
         end
     end
     assign pwm_clk = pwm_clk_div[4]; // Fast PWM for visible results
 
     // =============================================================================
-    // TEMPERATURE MONITORING - Case 6 (Always Active)
+    // TEMPERATURE MONITORING - Always Active
     // =============================================================================
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -124,14 +113,8 @@ module tt_um_ev_motor_control (
         end
     end
 
-    // Input selection based on mode - SIMPLIFIED
-    always @(*) begin
-        selected_accelerator = accelerator_value;
-        selected_brake = brake_value;
-    end
-
     // =============================================================================
-    // MAIN CONTROL LOGIC - FIXED
+    // MAIN CONTROL LOGIC - FIXED MOTOR SPEED CALCULATION
     // =============================================================================
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -144,7 +127,6 @@ module tt_um_ev_motor_control (
             motor_active <= 1'b0;
             pwm_active <= 1'b0;
             pwm_duty_cycle <= 8'b0;
-            speed_calculation <= 4'b0;
         end else if (ena) begin
             
             // Power control is always evaluated regardless of operation_select
@@ -194,17 +176,15 @@ module tt_um_ev_motor_control (
                     end
                     
                     // =================================================================
-                    // CASE 4: MOTOR SPEED CALCULATION - FIXED
+                    // CASE 4: MOTOR SPEED CALCULATION - COMPLETELY FIXED
                     // =================================================================
                     3'b100: begin
                         if (!temperature_fault) begin
-                            // Calculate speed: accelerator - brake and assign directly
-                            if (selected_accelerator > selected_brake) begin
-                                speed_calculation <= selected_accelerator - selected_brake;
-                                // Use combinational logic for immediate assignment
-                                motor_speed <= {(selected_accelerator - selected_brake), 4'b0000};
+                            // Direct calculation without intermediate register
+                            if (accelerator_value > brake_value) begin
+                                // Scale the difference by 16 for good range (4-bit to 8-bit)
+                                motor_speed <= {(accelerator_value - brake_value), 4'b0000};
                             end else begin
-                                speed_calculation <= 4'b0;
                                 motor_speed <= 8'b0;
                             end
                             motor_active <= 1'b1;
@@ -291,7 +271,9 @@ module tt_um_ev_motor_control (
     // Final output assignments
     assign uo_out = {status_led[1:0], overheat_warning, motor_pwm, 
                      right_indicator, horn_out, headlight_out, power_status};
-    assign uio_out = {motor_speed[3:0], 4'b0000}; // Motor speed in upper 4 bits to match uio_oe
+    
+    // FIXED: Output motor speed in a way that's easy to read
+    assign uio_out = {motor_speed[7:4], motor_speed[3:0]}; // Full 8-bit motor speed
 
     // Tie off unused input to prevent warnings
     wire _unused = &{ena, mode_select, motor_active, pwm_active, 1'b0};

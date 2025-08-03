@@ -29,14 +29,15 @@ module tt_um_ev_motor_control (
     wire horn_hmi = uio_in[1];                 // Horn control from HMI
     wire right_ind_plc = uio_in[2];            // Right indicator from PLC
     wire right_ind_hmi = uio_in[3];            // Right indicator from HMI
-    wire [3:0] accelerator_brake_data = uio_in[7:4]; // 4-bit data for accel/brake
+    
+    // SIMPLIFIED: Use uio_in directly for accel/brake - no complex timing
+    wire [3:0] accelerator_input = uio_in[7:4]; // Direct accelerator input
+    wire [3:0] brake_input = uio_in[3:0];       // Direct brake input (reusing lower bits)
 
     // Set uio_oe to control bidirectional pins (1=output, 0=input)
     assign uio_oe = 8'b11110000;  // uio[7:4] as outputs, uio[3:0] as inputs
 
     // Internal registers and wires
-    reg [3:0] accelerator_value;
-    reg [3:0] brake_value;
     reg [7:0] motor_speed;
     reg [7:0] pwm_counter;
     reg [7:0] pwm_duty_cycle;
@@ -44,39 +45,16 @@ module tt_um_ev_motor_control (
     reg temperature_fault;
     reg [6:0] internal_temperature;
     
-    // Output control registers for ALL cases
+    // Output control registers
     reg headlight_active;
     reg horn_active;
     reg indicator_active;
     reg motor_active;
     reg pwm_active;
 
-    // PWM and timing control
+    // PWM timing control
     reg [15:0] pwm_clk_div;
     wire pwm_clk;
-
-    // Data input control - simplified
-    reg [3:0] data_counter;
-
-    // =============================================================================
-    // DATA INPUT HANDLING - SIMPLIFIED
-    // =============================================================================
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            accelerator_value <= 4'd8;      // Default accelerator
-            brake_value <= 4'd3;            // Default brake  
-            data_counter <= 4'b0;
-        end else begin
-            data_counter <= data_counter + 1;
-            
-            // Capture data every few cycles - alternating between accel and brake
-            if (data_counter[2:0] == 3'b000) begin
-                accelerator_value <= accelerator_brake_data;
-            end else if (data_counter[2:0] == 3'b100) begin
-                brake_value <= accelerator_brake_data;
-            end
-        end
-    end
 
     // Generate PWM clock
     always @(posedge clk or negedge rst_n) begin
@@ -86,10 +64,10 @@ module tt_um_ev_motor_control (
             pwm_clk_div <= pwm_clk_div + 1;
         end
     end
-    assign pwm_clk = pwm_clk_div[4]; // Fast PWM for visible results
+    assign pwm_clk = pwm_clk_div[4]; // Fast PWM
 
     // =============================================================================
-    // TEMPERATURE MONITORING - Always Active
+    // TEMPERATURE MONITORING
     // =============================================================================
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -114,7 +92,7 @@ module tt_um_ev_motor_control (
     end
 
     // =============================================================================
-    // MAIN CONTROL LOGIC - FIXED MOTOR SPEED CALCULATION
+    // MAIN CONTROL LOGIC - DIRECT MOTOR SPEED CALCULATION
     // =============================================================================
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -129,7 +107,7 @@ module tt_um_ev_motor_control (
             pwm_duty_cycle <= 8'b0;
         end else if (ena) begin
             
-            // Power control is always evaluated regardless of operation_select
+            // Power control is always evaluated
             system_enabled <= (power_on_plc | power_on_hmi);
             
             // Reset all outputs when power is off
@@ -142,86 +120,76 @@ module tt_um_ev_motor_control (
                 motor_speed <= 8'b0;
                 pwm_duty_cycle <= 8'b0;
             end else begin
-                // Only execute operations when system is powered
+                // Execute operations when system is powered
                 case (operation_select)
                     // =================================================================
-                    // CASE 0: POWER CONTROL (operation_select = 3'b000)
+                    // CASE 0: POWER CONTROL
                     // =================================================================
                     3'b000: begin
-                        // Power control is handled above - just maintain state
+                        // Power control handled above
                     end
                     
                     // =================================================================
-                    // CASE 1: HEADLIGHT CONTROL (operation_select = 3'b001)
+                    // CASE 1: HEADLIGHT CONTROL
                     // =================================================================
                     3'b001: begin
-                        // XOR logic: only one source should control
                         headlight_active <= (headlight_plc ^ headlight_hmi);
                     end
                     
                     // =================================================================
-                    // CASE 2: HORN CONTROL (operation_select = 3'b010)
+                    // CASE 2: HORN CONTROL
                     // =================================================================
                     3'b010: begin
-                        // XOR logic for horn control
                         horn_active <= (horn_plc ^ horn_hmi);
                     end
                     
                     // =================================================================
-                    // CASE 3: RIGHT INDICATOR CONTROL (operation_select = 3'b011)
+                    // CASE 3: RIGHT INDICATOR CONTROL
                     // =================================================================
                     3'b011: begin
-                        // XOR logic for indicator control
                         indicator_active <= (right_ind_plc ^ right_ind_hmi);
                     end
                     
                     // =================================================================
-                    // CASE 4: MOTOR SPEED CALCULATION - COMPLETELY FIXED
+                    // CASE 4: MOTOR SPEED - DIRECT CALCULATION (NO TIMING ISSUES)
                     // =================================================================
                     3'b100: begin
+                        motor_active <= 1'b1;
                         if (!temperature_fault) begin
-                            // Direct calculation without intermediate register
-                            if (accelerator_value > brake_value) begin
-                                // Scale the difference by 16 for good range (4-bit to 8-bit)
-                                motor_speed <= {(accelerator_value - brake_value), 4'b0000};
+                            // DIRECT calculation using current input values
+                            if (accelerator_input > brake_input) begin
+                                motor_speed <= (accelerator_input - brake_input) << 4; // Scale by 16
                             end else begin
                                 motor_speed <= 8'b0;
                             end
-                            motor_active <= 1'b1;
                         end else begin
-                            // Reduce speed by 50% during overheating
-                            motor_speed <= motor_speed >> 1;
-                            motor_active <= 1'b1;
+                            motor_speed <= motor_speed >> 1; // Reduce during overheat
                         end
                     end
                     
                     // =================================================================
-                    // CASE 5: PWM GENERATION (operation_select = 3'b101)
+                    // CASE 5: PWM GENERATION
                     // =================================================================
                     3'b101: begin
+                        pwm_active <= 1'b1;
                         if (!temperature_fault) begin
                             pwm_duty_cycle <= motor_speed;
-                            pwm_active <= 1'b1;
                         end else begin
-                            // Reduced PWM during fault
                             pwm_duty_cycle <= motor_speed >> 1;
-                            pwm_active <= 1'b1;
                         end
                     end
                     
                     // =================================================================
-                    // CASE 6: TEMPERATURE MONITORING (operation_select = 3'b110)
+                    // CASE 6: TEMPERATURE MONITORING
                     // =================================================================
                     3'b110: begin
-                        // Temperature monitoring is handled in separate always block
-                        // This case maintains current state and allows temperature readout
+                        // Temperature monitoring handled separately
                     end
                     
                     // =================================================================
-                    // CASE 7: SYSTEM STATUS/RESET (operation_select = 3'b111)
+                    // CASE 7: SYSTEM RESET
                     // =================================================================
                     3'b111: begin
-                        // Reset all active states
                         motor_speed <= 8'b0;
                         pwm_duty_cycle <= 8'b0;
                         headlight_active <= 1'b0;
@@ -231,9 +199,8 @@ module tt_um_ev_motor_control (
                         pwm_active <= 1'b0;
                     end
                     
-                    // Default case: maintain current state
                     default: begin
-                        // Maintain current state for any undefined operations
+                        // Maintain current state
                     end
                 endcase
             end
@@ -246,23 +213,23 @@ module tt_um_ev_motor_control (
     always @(posedge pwm_clk or negedge rst_n) begin
         if (!rst_n) begin
             pwm_counter <= 8'b0;
-        end else if (system_enabled || pwm_active) begin
+        end else if (system_enabled) begin
             pwm_counter <= pwm_counter + 1;
-        end else begin
+        else begin
             pwm_counter <= 8'b0;
         end
     end
 
     // =============================================================================
-    // OUTPUT ASSIGNMENTS - ALL OUTPUTS PROPERLY DEFINED
+    // OUTPUT ASSIGNMENTS
     // =============================================================================
     wire power_status = system_enabled;
     wire headlight_out = headlight_active & system_enabled;
     wire horn_out = horn_active & system_enabled;
     wire right_indicator = indicator_active & system_enabled;
     
-    // PWM output with proper duty cycle control
-    wire motor_pwm = (system_enabled && pwm_duty_cycle > 0) ? 
+    // PWM output - FIXED to work properly
+    wire motor_pwm = (system_enabled && pwm_duty_cycle > 8'b0) ? 
                      (pwm_counter < pwm_duty_cycle) : 1'b0;
                      
     wire overheat_warning = temperature_fault;
@@ -272,10 +239,10 @@ module tt_um_ev_motor_control (
     assign uo_out = {status_led[1:0], overheat_warning, motor_pwm, 
                      right_indicator, horn_out, headlight_out, power_status};
     
-    // FIXED: Output motor speed in a way that's easy to read
-    assign uio_out = {motor_speed[7:4], motor_speed[3:0]}; // Full 8-bit motor speed
+    // Output motor speed for debugging
+    assign uio_out = motor_speed;
 
-    // Tie off unused input to prevent warnings
+    // Tie off unused signals
     wire _unused = &{ena, mode_select, motor_active, pwm_active, 1'b0};
 
 endmodule

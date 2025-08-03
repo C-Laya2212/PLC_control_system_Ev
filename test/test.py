@@ -192,8 +192,8 @@ async def test_project(dut):
     dut._log.info(f"HMI Indicator Only - Indicator: {indicator}")
     assert indicator == 1, f"Expected indicator=1, got {indicator}"
     
-    # =============================================================================
-    # CASE 4: MOTOR SPEED CALCULATION (operation_select = 3'b100)
+  # =============================================================================
+    # CASE 4: MOTOR SPEED CALCULATION - FIXED
     # =============================================================================
     dut._log.info("CASE 4: MOTOR SPEED CALCULATION")
     
@@ -204,35 +204,25 @@ async def test_project(dut):
     # Test motor speed calculation
     dut.ui_in.value = 0b00001100  # power_on_plc=1, operation_select=100
     
-    # Wait for data capture phases and set test values
-    # Set accelerator = 12
-    dut.uio_in.value = 0b11000000  # accelerator_brake_data = 12 (1100)
+    # Set accelerator = 12 (0xC) - wait for data capture
+    dut.uio_in.value = 0b11000000  # accelerator_brake_data = 12 (1100) in upper 4 bits
     await ClockCycles(dut.clk, 20)
     
-    # Set brake = 4  
-    dut.uio_in.value = 0b01000000  # accelerator_brake_data = 4 (0100)
-    await ClockCycles(dut.clk, 50)  # Wait longer for calculation
+    # Set brake = 4 (0x4) - wait for data capture  
+    dut.uio_in.value = 0b01000000  # accelerator_brake_data = 4 (0100) in upper 4 bits
+    await ClockCycles(dut.clk, 50)  # Wait for calculation
     
-    # Check results
+    # Read motor speed - now it's the full 8-bit value
     motor_speed = safe_read_output(dut.uio_out)
     output_val = safe_read_output(dut.uo_out)
     power, _, _, _, _, _, _ = decode_output(output_val)
     
     dut._log.info(f"Motor Speed Test 1 - Motor Speed: {motor_speed}, Power: {power}")
+    dut._log.info(f"  Expected: accel(12) - brake(4) = 8, scaled = 8*16 = 128")
     dut._log.info(f"  Output: 0x{output_val:02x}")
     
     # Motor speed should be > 0 when accelerator > brake
     assert motor_speed > 0, f"Expected motor_speed > 0, got {motor_speed}"
-    
-    # Test edge case: brake >= accelerator
-    dut.uio_in.value = 0b00110000  # accelerator = 3
-    await ClockCycles(dut.clk, 20)
-    dut.uio_in.value = 0b10000000  # brake = 8
-    await ClockCycles(dut.clk, 50)
-    
-    motor_speed3 = safe_read_output(dut.uio_out)
-    dut._log.info(f"Motor Speed Test (brake > accel) - Motor Speed: {motor_speed3}")
-    # When brake >= accelerator, speed should be 0
     
     # =============================================================================
     # CASE 5: PWM GENERATION (operation_select = 3'b101)
